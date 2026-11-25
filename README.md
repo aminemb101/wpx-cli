@@ -68,3 +68,7 @@ wpx create ~/sites \
     ├── docker-compose.yml
     └── dockerfiles/
 ```
+
+## Todos
+
+- Run a global `nginx-proxy` container on port `80`, connected to an external `proxy` network.
