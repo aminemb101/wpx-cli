@@ -59,6 +59,14 @@ wpx create ~/sites \
   --admin_email dev@portal.test
 ```
 
+### Resolve the Site Hostname Locally
+
+Before opening the site, make sure its hostname resolves to your local machine. Add an entry to `/etc/hosts`, replacing `shop3.test` with the value passed to `--host_name`:
+
+```bash
+echo "127.0.0.1 shop3.test" | sudo tee -a /etc/hosts
+```
+
 ### Generated Directory Structure
 
 ```text
@@ -71,4 +79,4 @@ wpx create ~/sites \
 
 ## Todos
 
-- Run a global `nginx-proxy` container on port `80`, connected to an external `proxy` network.
+- ~~Run a global `nginx-proxy` container on port `80`, connected to an external `proxy` network.~~
