@@ -54,6 +54,7 @@ RUN php -r "copy('https://getcomposer.org/installer', 'composer-setup.php');" &&
     php -r "unlink('composer-setup.php');" && \
     mv composer.phar /usr/local/bin/composer
 
+#Backup default php configuration
 RUN cp -a /usr/local/etc/php /usr/local/etc/php-defaults
 WORKDIR /var/www/html
 

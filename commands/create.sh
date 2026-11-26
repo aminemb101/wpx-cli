@@ -4,14 +4,19 @@ set -euo pipefail
 FORCE=false
 
 
-WP_VERSION="latest"
+
 HOST_NAME=""
+
+WP_VERSION="latest"
 ADMIN_EMAIL="admin@example.test"
 ADMIN_USER="admin"
 ADMIN_PASSWORD="password"
-SITE_NAME=""
+SITE_NAME="Demo site"
+INST_PATH=$(pwd)
+
+
 PHP_VERSION="8.2"
-INST_PATH='.'
+
 DB_ROOT_USER=root
 DB_ROOT_PASS=hguyFtgfR4r9R4r76
 
@@ -34,25 +39,23 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         --wp_version)
-            WP_VERSION="${2:-}"
+            WP_VERSION="${2:-$WP_VERSION}"
             shift 2
             ;;
         --host_name=*)
             HOST_NAME="${1#*=}"
             shift
-         
             ;;
         --host_name)
-            HOST_NAME="${2:-}"
+            HOST_NAME="${2:-$HOST_NAME}"
             shift 2
-           
             ;;
         --admin_email=*)
             ADMIN_EMAIL="${1#*=}"
             shift
             ;;
         --admin_email)
-            ADMIN_EMAIL="${2:-}"
+            ADMIN_EMAIL="${2:-$ADMIN_EMAIL}"
             shift 2
             ;;
         --admin_user=*)
@@ -60,7 +63,7 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         --admin_user)
-            ADMIN_USER="${2:-}"
+            ADMIN_USER="${2:-$ADMIN_USER}"
             shift 2
             ;;
         --admin_pass=*)
@@ -68,15 +71,16 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         --admin_pass)
-            ADMIN_PASSWORD="${2:-}"
+            ADMIN_PASSWORD="${2:-$ADMIN_PASSWORD}"
             shift 2
             ;;
         --site_name=*)
             SITE_NAME="${1#*=}"
+            echo "${SITE_NAME}"
             shift
             ;;
         --site_name)
-            SITE_NAME="${2:-}"
+            SITE_NAME="${2:-$SITE_NAME}"
             shift 2
             ;;
         --php=*)
@@ -84,9 +88,17 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         --php)
-            PHP_VERSION="${2:-}"
+            PHP_VERSION="${2:-$PHP_VERSION}"
             shift 2
             ;;
+		--db-root-pass=*)
+			DB_ROOT_PASS="${1#*=}"
+		    shift
+			;;
+		--db-root-pass)
+			DB_ROOT_PASS="${2:-$DB_ROOT_PASS}"
+		    shift 2
+			;;
         --redis)
             ENABLE_REDIS=true
             shift
@@ -108,10 +120,7 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-if [[ -z "${SITE_NAME:-}" ]]; then
-    echo "Error: SITE_NAME is required (used as the Docker Compose project name)." >&2
-    exit 1
-fi
+
 
 if [[ -z "${HOST_NAME:-}" ]]; then
     echo "Error: HOST_NAME is required (used as the site folder name)." >&2
@@ -120,33 +129,49 @@ fi
 
 
 
-if docker compose ls --all --format json | grep -q "\"Name\":\"${SITE_NAME}\"" && [[ "$FORCE" != true ]]; then
-    echo "Error: Docker Compose project '${SITE_NAME}' already exists. Choose a different SITE_NAME or destroy it first." >&2
-    exit 1
-fi
 
-PHP_SERVICE="wp-php"
-MYSQL_SERVICE="wp-mariadb"
-NGINX_SERVICE="wp-nginx"
+PHP_SERVICE="wpx-php"
+MYSQL_SERVICE="wpx-mariadb"
+NGINX_SERVICE="wpx-nginx"
 
 
 SITE_SLUG="$(echo "$SITE_NAME" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-+|-+$//g')"
 # Installation directory where tempaltes (docker files and docker compose will be copied to)
 DIR="${INST_PATH}/${SITE_SLUG}"
+PROJECT_NAME="$(printf '%s' "$DIR" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-+|-+$//g')"
+
+# if docker compose ls --all --format json | grep -q "\"Name\":\"${PROJECT_NAME}\"" && [[ "$FORCE" != true ]]; then
+#     echo "Error: Docker Compose project '${PROJECT_NAME}' already exists. Choose a different path or destroy it first." >&2
+#     exit 1
+# fi
 
 
-docker compose -p "${SITE_NAME}" down && rm -rf "$DIR"
-
-if [[ -d "${DIR}" && -n "$(ls -A "${DIR}" 2>/dev/null)" && "$FORCE" != true ]]; then
-    echo "Error: Directory '${DIR}' already exists and is not empty. Use --force to overwrite." >&2
-    exit 1
+# Create the network only if it doesn't exist
+if ! docker network inspect wpx-proxy >/dev/null 2>&1; then
+  docker network create wpx-proxy
 fi
+
+# Start the proxy only if a container with this name doesn't exist
+if ! docker container inspect wpx-nginx-proxy >/dev/null 2>&1; then
+  docker run -d \
+    --name wpx-nginx-proxy \
+    --restart unless-stopped \
+    --network wpx-proxy \
+    -p 80:80 \
+    -p 443:443 \
+    -v /var/run/docker.sock:/tmp/docker.sock:ro \
+    nginxproxy/nginx-proxy:1.11
+fi
+
+#TEAR down project if it exisits for testing only												   			
+#docker compose -p "${PROJECT_NAME}" down && rm -rf "$DIR"
+
 
 mkdir -p "$DIR/.docker"
 
 cat << ENVFILE > "$DIR/.docker/.env" 
 SITE_NAME=$SITE_NAME
-COMPOSE_PROJECT_NAME=$SITE_NAME
+COMPOSE_PROJECT_NAME=$PROJECT_NAME
 HOST_NAME=$HOST_NAME
 DB_ROOT_PASSWORD=$DB_ROOT_PASS
 USER_UID=1000
@@ -158,14 +183,16 @@ TEMPLATES_DIR="./templates"
 
 cp -r "${TEMPLATES_DIR}/dockerfiles" "${DIR}/.docker/"
 cp ${TEMPLATES_DIR}/docker-compose.yml "${DIR}/.docker/"
+
+
 #2 start the containers from compose
-docker compose --env-file "${DIR}/.docker/.env"  -p "$SITE_NAME" -f "${DIR}/.docker/docker-compose.yml"  up  -d --wait 
+docker compose --env-file "${DIR}/.docker/.env"  -p "$PROJECT_NAME" -f "${DIR}/.docker/docker-compose.yml"  up  -d --wait 
 
 
 #3 create the site
-DB_NAME="wp-db"
+DB_NAME="wpx-db"
 
-docker compose -p "${SITE_NAME}" exec -T $MYSQL_SERVICE sh << EOF
+docker compose -p "${PROJECT_NAME}" exec -T $MYSQL_SERVICE sh << EOF
 	set -e 
 
 	mariadb  "-p${DB_ROOT_PASS}" -e "DROP DATABASE IF EXISTS \\\`${DB_NAME}\\\`"	
@@ -175,7 +202,7 @@ EOF
 
 DOC_ROOT="/var/www/html/"
 
-docker compose -p "${SITE_NAME}" exec -T "$PHP_SERVICE" sh << EOF
+docker compose -p "${PROJECT_NAME}" exec -T "$PHP_SERVICE" sh << EOF
 	
 	set -e 
 	
@@ -198,7 +225,7 @@ docker compose -p "${SITE_NAME}" exec -T "$PHP_SERVICE" sh << EOF
 EOF
 
 
-docker compose -p "${SITE_NAME}" exec -T  "${NGINX_SERVICE}" sh << EOF
+docker compose -p "${PROJECT_NAME}" exec -T  "${NGINX_SERVICE}" sh << EOF
        set -e 
 	   
 		cat << VHOST  >  "/etc/nginx/conf.d/${HOST_NAME}.conf"
@@ -211,7 +238,7 @@ docker compose -p "${SITE_NAME}" exec -T  "${NGINX_SERVICE}" sh << EOF
 						try_files \\\$uri \\\$uri/ /index.php?\\\$args;
 					}
 					location ~ \.php$ {
-					fastcgi_pass   wp-php:9000;
+					fastcgi_pass   ${PHP_SERVICE}:9000;
 					fastcgi_index  index.php;
 					fastcgi_param  SCRIPT_FILENAME \\\$document_root\\\$fastcgi_script_name;
 					include        fastcgi_params;

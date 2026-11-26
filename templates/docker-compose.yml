@@ -1,15 +1,13 @@
 services:
-  
 
-  wp-php:
-    container_name: "${COMPOSE_PROJECT_NAME}-wp-php"
+  wpx-php:
+    container_name: "${COMPOSE_PROJECT_NAME}-wpx-php"
     build: 
       context: './dockerfiles/php'
       args:
         PHP_VERSION: ${PHP_VERSION:-8.4}
     volumes:
       - '..:/var/www/html'
-      # - './docker-fpm.ini:/usr/local/etc/php/conf.d/docker-fpm.ini'
       - './php-conf:/usr/local/etc/php'
     dns:
       - 8.8.8.8
@@ -27,23 +25,38 @@ services:
               chown -R ${USER_UID:-1000}:${USER_GID:-1000} /usr/local/etc/php
             fi
 
-  wp-nginx:
-    container_name: "${COMPOSE_PROJECT_NAME}-wp-nginx"
+  wpx-nginx:
+    container_name: "${COMPOSE_PROJECT_NAME}-wpx-nginx"
     build: './dockerfiles/nginx'
-    ports: ['80:80']
     volumes:
       - '../:/var/www/html'
       - './vhosts:/etc/nginx/conf.d'
+    networks:
+      - wpx-proxy
+      - default
+    depends_on:
+      - wpx-php
+    environment:
+      - VIRTUAL_HOST=${HOST_NAME}
    
-  wp-mariadb:
-    container_name: "${COMPOSE_PROJECT_NAME}-wp-mariadb"
+    
+  wpx-mariadb:
+    container_name: "${COMPOSE_PROJECT_NAME}-wpx-mariadb"
     image: yobasystems/alpine-mariadb
-    ports: ['3306:3306']
+    healthcheck:
+      test: ["CMD-SHELL", "test -S /run/mysqld/mysqld.sock"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 30s
     environment:
       MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-root_password}
     volumes:
-      - "wp-db:/var/lib/mysql"
+      - "wpx-db:/var/lib/mysql"
+    
+networks:
+  wpx-proxy:
+    external: true
   
-
 volumes: 
-  wp-db:
+  wpx-db:
